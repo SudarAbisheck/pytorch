@@ -2,6 +2,15 @@
 #define THS_GENERIC_FILE "tensors/generic/THSTensor.cpp"
 #else
 
+#define const_tensor_cast(tensor) \
+  dynamic_cast<const THSTensor&>(tensor)
+#define const_storage_cast(storage) \
+  dynamic_cast<const THStorage<real>&>(storage)
+#define const_long_cast(tensor) \
+  dynamic_cast<const THSTensor<long>&>(tensor)
+#define const_byte_cast(tensor) \
+  dynamic_cast<const THSTensor<unsigned char>&>(tensor)
+
 template<>
 THSTensor<real>::THSTensor():
   tensor(THSTensor_(new)())
@@ -30,13 +39,18 @@ auto THSTensor<real>::clone_shallow() -> THSTensor* {
 }
 
 template<>
+auto THSTensor<real>::contiguous() const -> std::unique_ptr<Tensor> {
+  return std::unique_ptr<Tensor>(new THSTensor(THSTensor_(newContiguous)(tensor)));
+}
+
+template<>
 int THSTensor<real>::nDim() const {
-  return tensor->nDimension;
+  return tensor->nDimensionI;
 }
 
 template<>
 auto THSTensor<real>::sizes() const -> long_range {
-  return std::vector<long>(tensor->size, tensor->size + tensor->nDimension);
+  return std::vector<long>(tensor->size, tensor->size + tensor->nDimensionI);
 }
 
 template<>
@@ -86,12 +100,12 @@ const void* THSTensor<real>::data() const {
 
 template<>
 void* THSTensor<real>::cdata() {
-  throw std::runtime_error("THSTensor::cdata() not supported");
+  return tensor;
 }
 
 template<>
 const void* THSTensor<real>::cdata() const {
-  throw std::runtime_error("THSTensor::cdata() not supported");
+  return tensor;
 }
 
 template<>
@@ -128,36 +142,55 @@ auto THSTensor<real>::set(const Tensor& src) -> THSTensor& {
 template<>
 auto THSTensor<real>::setStorage(const Storage& storage,
                                  ptrdiff_t storageOffset,
+                                 const long_range& size,
+                                 const long_range& stride) -> THSTensor& {
+  throw std::runtime_error("THSTensor::setStorage not supported");
+}
+
+template<>
+auto THSTensor<real>::setStorage(const Storage& storage,
+                                 ptrdiff_t storageOffset,
                                  THLongStorage *size,
                                  THLongStorage *stride) -> THSTensor& {
-  throw std::runtime_error("THSTensor::setStorage not supported");}
-
+  throw std::runtime_error("THSTensor::setStorage not supported");
+}
 
 template<>
 auto THSTensor<real>::narrow(const Tensor& src,
                              int dimension,
                              long firstIndex,
                              long size) -> THSTensor& {
-  throw std::runtime_error("THSTensor::narrow not supported");}
-
+  throw std::runtime_error("THSTensor::narrow not supported");
+}
 
 template<>
 auto THSTensor<real>::select(const Tensor& src, int dimension,
                              long sliceIndex) -> THSTensor& {
-  throw std::runtime_error("THSTensor::select not supported");}
-
+  throw std::runtime_error("THSTensor::select not supported");
+}
 
 template<>
 auto THSTensor<real>::transpose(const Tensor& src, int dimension1,
                                 int dimension2) -> THSTensor& {
-  throw std::runtime_error("THSTensor::transpose not supported");}
+  throw std::runtime_error("THSTensor::transpose not supported");
+}
 
 
 template<>
 auto THSTensor<real>::unfold(const Tensor& src, int dimension,
                              long size, long step) ->THSTensor& {
-  throw std::runtime_error("THSTensor::unfold not supported");}
+  throw std::runtime_error("THSTensor::unfold not supported");
+}
 
+template<>
+auto THSTensor<real>::squeeze(const Tensor& src, int dimension) -> THSTensor& {
+  throw std::runtime_error("THSTensor::squeeze not supported");
+}
+
+template<>
+auto THSTensor<real>::unsqueeze(const Tensor& src, int dimension) -> THSTensor& {
+  throw std::runtime_error("THSTensor::unsqueeze not supported");
+}
 
 template<>
 auto THSTensor<real>::fill(scalar_type value) -> THSTensor& {
@@ -174,6 +207,161 @@ template<>
 auto THSTensor<real>::free() -> THSTensor& {
   THSTensor_(free)(tensor);
   return *this;
+}
+
+template<>
+auto THSTensor<real>::diag(const Tensor& src, int k) -> THSTensor& {
+  throw std::runtime_error("THSTensor::diag() not supported");
+}
+
+template<>
+auto THSTensor<real>::eye(long n, long m) -> THSTensor& {
+  throw std::runtime_error("THSTensor::eye() not supported");
+}
+
+template<>
+auto THSTensor<real>::range(scalar_type xmin, scalar_type xmax,
+                           scalar_type step) -> THSTensor& {
+  throw std::runtime_error("THSTensor::range() not supported");
+}
+
+template<>
+auto THSTensor<real>::sort(const Tensor& ri, const Tensor& src,
+                          int dimension, int desc) -> THSTensor& {
+  throw std::runtime_error("THSTensor::sort() not supported");
+}
+
+template<>
+auto THSTensor<real>::topk(const Tensor& ri, const Tensor& src,
+                          long k, int dim, int dir, int sorted) -> THSTensor& {
+  throw std::runtime_error("THSTensor::topk() not supported");
+}
+
+template<>
+auto THSTensor<real>::tril(const Tensor& src, long k) -> THSTensor& {
+  throw std::runtime_error("THSTensor::tril() not supported");
+}
+
+template<>
+auto THSTensor<real>::triu(const Tensor& src, long k) -> THSTensor& {
+  throw std::runtime_error("THSTensor::triu() not supported");
+}
+
+template<>
+auto THSTensor<real>::catArray(const std::vector<Tensor*>& inputs_vec,
+                              int dimension) -> THSTensor& {
+  throw std::runtime_error("THSTensor::catArray() not supported");
+}
+
+template<>
+int THSTensor<real>::equal(const Tensor& other) const {
+  throw std::runtime_error("THSTensor::equal() not supported");
+}
+
+  // Note: the order in *Value and *Tensor is reversed compared to
+  // the declarations in TH/generic/THSTensorMath.h, so for instance
+  // the call THRealTensor_ltTensor(r, ta, tb) is equivalent to
+  // ta->ltTensor(r, tb). It is done this way so that the first
+  // argument can be casted onto a byte tensor type
+
+#define TENSOR_IMPLEMENT_LOGICAL(NAME)                               \
+  template<>                                                         \
+  auto THSTensor<real>::NAME##Value(const Tensor& r,                  \
+                                   scalar_type value) -> THSTensor& { \
+    throw std::invalid_argument("THSTensor::" #NAME "Value() not supported"); \
+  }                                                                  \
+                                                                     \
+  template<>                                                         \
+  auto THSTensor<real>::NAME##ValueT(const Tensor& t,                 \
+                                   scalar_type value) -> THSTensor& { \
+    throw std::invalid_argument("THSTensor::" #NAME "ValueT() not supported"); \
+  }                                                                  \
+                                                                     \
+  template<>                                                         \
+  auto THSTensor<real>::NAME##Tensor(const Tensor& r,                 \
+                                    const Tensor& tb) -> THSTensor& { \
+    throw std::invalid_argument("THSTensor::" #NAME "Tensor() not supported"); \
+  }                                                                  \
+                                                                     \
+  template<>                                                         \
+  auto THSTensor<real>::NAME##TensorT(const Tensor& ta,               \
+                                     const Tensor& tb) -> THSTensor& { \
+    throw std::invalid_argument("THSTensor::" #NAME "TensorT() not supported"); \
+  }                                                                  \
+
+TENSOR_IMPLEMENT_LOGICAL(lt)
+TENSOR_IMPLEMENT_LOGICAL(gt)
+TENSOR_IMPLEMENT_LOGICAL(le)
+TENSOR_IMPLEMENT_LOGICAL(ge)
+TENSOR_IMPLEMENT_LOGICAL(eq)
+TENSOR_IMPLEMENT_LOGICAL(ne)
+
+#undef TENSOR_IMPLEMENT_LOGICAL
+
+
+template<>
+auto THSTensor<real>::abs(const Tensor& src) -> THSTensor& {
+  throw std::runtime_error("THSTensor::abs() not supported");
+}
+
+template<>
+auto THSTensor<real>::sigmoid(const Tensor& src) -> THSTensor& {
+  throw std::runtime_error("THSTensor::sigmoid() not supported");
+}
+
+template<>
+auto THSTensor<real>::log(const Tensor& src) -> THSTensor& {
+  throw std::runtime_error("THSTensor::log() not supported");
+}
+
+template<>
+auto THSTensor<real>::log1p(const Tensor& src) -> THSTensor& {
+  throw std::runtime_error("THSTensor::log1p() not supported");
+}
+
+template<>
+auto THSTensor<real>::exp(const Tensor& src) -> THSTensor& {
+  throw std::runtime_error("THSTensor::exp() not supported");
+}
+
+template<>
+auto THSTensor<real>::cos(const Tensor& src) -> THSTensor& {
+  throw std::runtime_error("THSTensor::cos() not supported");
+}
+
+template<>
+auto THSTensor<real>::acos(const Tensor& src) -> THSTensor& {
+  throw std::runtime_error("THSTensor::acos() not supported");
+}
+
+template<>
+auto THSTensor<real>::cosh(const Tensor& src) -> THSTensor& {
+  throw std::runtime_error("THSTensor::cosh() not supported");
+}
+
+template<>
+auto THSTensor<real>::sin(const Tensor& src) -> THSTensor& {
+  throw std::runtime_error("THSTensor::sin() not supported");
+}
+
+template<>
+auto THSTensor<real>::asin(const Tensor& src) -> THSTensor& {
+  throw std::runtime_error("THSTensor::asin() not supported");
+}
+
+template<>
+auto THSTensor<real>::sinh(const Tensor& src) -> THSTensor& {
+  throw std::runtime_error("THSTensor::sinh() not supported");
+}
+
+template<>
+auto THSTensor<real>::copy(const Tensor& src) -> THSTensor& {
+  throw std::runtime_error("THSTensor::copy() not supported");
+}
+
+template<>
+auto THSTensor<real>::cat(const std::vector<Tensor*>& src, int dimension) -> THSTensor& {
+  throw std::runtime_error("THSTensor::cat() not supported");
 }
 
 template<>
@@ -238,12 +426,16 @@ auto THSTensor<real>::sub(const Tensor &src, scalar_type value) -> THSTensor& {
 
 template<>
 auto THSTensor<real>::mul(const Tensor &src, scalar_type value) -> THSTensor& {
-  throw std::runtime_error("THSTensor::mul() not supported");
+  const THSTensor &src_t = const_tensor_cast(src);
+  THSTensor_(mul)(tensor, src_t.tensor, value);
+  return *this;
 }
 
 template<>
 auto THSTensor<real>::div(const Tensor &src, scalar_type value) -> THSTensor& {
-  throw std::runtime_error("THSTensor::div() not supported");
+  const THSTensor &src_t = const_tensor_cast(src);
+  THSTensor_(div)(tensor, src_t.tensor, value);
+  return *this;
 }
 
 template<>
@@ -263,12 +455,15 @@ auto THSTensor<real>::clamp(const Tensor &src, scalar_type min_value, scalar_typ
 
 template<>
 auto THSTensor<real>::cadd(const Tensor& src1, scalar_type value, const Tensor& src2) -> THSTensor& {
-  throw std::runtime_error("THSTensor::cadd() not supported");
+  const THSTensor &src1_t = const_tensor_cast(src1);
+  const THSTensor &src2_t = const_tensor_cast(src2);
+  THSTensor_(cadd)(tensor, src1_t.tensor, value, src2_t.tensor);
+  return *this;
 }
 
 template<>
 auto THSTensor<real>::cadd(const Tensor& src1, const Tensor& src2) -> THSTensor& {
-  throw std::runtime_error("THSTensor::cadd() not supported");
+  return cadd(src1, static_cast<scalar_type>(1), src2);
 }
 
 template<>
@@ -278,7 +473,10 @@ auto THSTensor<real>::csub(const Tensor& src1, scalar_type value, const Tensor& 
 
 template<>
 auto THSTensor<real>::cmul(const Tensor& src1, const Tensor& src2) -> THSTensor& {
-  throw std::runtime_error("THSTensor::cmul() not supported");
+  const THSTensor &src1_t = const_tensor_cast(src1);
+  const THSTensor &src2_t = const_tensor_cast(src2);
+  THSTensor_(cmul)(tensor, src1_t.tensor, src2_t.tensor);
+  return *this;
 }
 
 template<>

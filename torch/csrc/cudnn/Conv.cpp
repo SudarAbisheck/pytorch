@@ -189,27 +189,45 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgo_t> {
 };
 
 template<typename algo_t>
-Workspace chooseAlgorithm(
+void findAlgorithm(
     THCState* state, cudnnHandle_t handle, const Convolution& conv,
     bool benchmark, algo_t* algo)
 {
   using search = algorithm_search<algo_t>;
   auto& cache = search::cache();
 
-  if (!cache.find(conv.params, algo)) {
-    if (benchmark) {
-      auto perfResults = search::findAlgorithm(handle, conv);
-      if (perfResults.status == CUDNN_STATUS_SUCCESS) {
-        *algo = perfResults.algo;
-      } else {
-        *algo = search::DEFAULT_ALGO;
-      }
-      cache.insert(conv.params, *algo);
-    } else {
-      search::getAlgorithm(handle, conv, algo);
-    }
+  if (cache.find(conv.params, algo)) {
+    return;
   }
 
+  if (!benchmark) {
+    search::getAlgorithm(handle, conv, algo);
+    return;
+  }
+
+  // findAlgorithm may call cudaFree()
+  std::lock_guard<std::mutex> lock(*THCCachingAllocator_getCudaFreeMutex());
+  if (cache.find(conv.params, algo)) {
+    // re-check cache since another thread may have benchmarked the algorithm
+    return;
+  }
+  auto perfResults = search::findAlgorithm(handle, conv);
+  if (perfResults.status == CUDNN_STATUS_SUCCESS) {
+    *algo = perfResults.algo;
+  } else {
+    *algo = search::DEFAULT_ALGO;
+  }
+  cache.insert(conv.params, *algo);
+}
+
+template<typename algo_t>
+Workspace chooseAlgorithm(
+    THCState* state, cudnnHandle_t handle, const Convolution& conv,
+    bool benchmark, algo_t* algo)
+{
+  findAlgorithm(state, handle, conv, benchmark, algo);
+
+  using search = algorithm_search<algo_t>;
   size_t workspace_size;
   search::getWorkspaceSize(handle, conv, *algo, &workspace_size);
   try {
@@ -220,7 +238,7 @@ Workspace chooseAlgorithm(
     // switch to default algorithm and record it in the cache to prevent
     // further OOM errors
     *algo = search::DEFAULT_ALGO;
-    cache.insert(conv.params, *algo);
+    search::cache().insert(conv.params, *algo);
 
     search::getWorkspaceSize(handle, conv, *algo, &workspace_size);
     return Workspace(state, workspace_size);
@@ -285,6 +303,7 @@ void cudnn_convolution_forward(
     THVoidTensor* input, THVoidTensor* weight, THVoidTensor* output,
     Convolution* info, bool benchmark)
 {
+  assertSameGPU(dataType, input, weight, output);
   int groups = info->groups;
 
   cudnnConvolutionFwdAlgo_t fwdAlg;
@@ -309,6 +328,7 @@ void cudnn_convolution_add_bias(
     THVoidTensor* bias, THVoidTensor* output,
     Convolution* info)
 {
+  assertSameGPU(dataType, bias, output);
   CHECK_ARG(output->nDimension <= 5);
   TensorDescriptor& bdesc = info->bdesc;
 
@@ -329,6 +349,7 @@ void cudnn_convolution_backward_data(
     THVoidTensor* gradOutput, THVoidTensor* gradInput, THVoidTensor* weight,
     Convolution* info, bool benchmark)
 {
+  assertSameGPU(dataType, gradOutput, gradInput, weight);
   int groups = info->params.groups;
 
   cudnnConvolutionBwdDataAlgo_t bwdDataAlg;
@@ -353,6 +374,7 @@ void cudnn_convolution_backward_filter(
     THVoidTensor* gradOutput, THVoidTensor* input, THVoidTensor* gradWeight,
     Convolution* info, bool benchmark)
 {
+  assertSameGPU(dataType, gradOutput, input, gradWeight);
   int groups = info->params.groups;
 
   cudnnConvolutionBwdFilterAlgo_t bwdFilterAlg;
@@ -380,6 +402,7 @@ void cudnn_convolution_backward_bias(
     THCState* state, cudnnHandle_t handle, cudnnDataType_t dataType,
     THVoidTensor* gradOutput, THVoidTensor* gradBias, Convolution* info)
 {
+  assertSameGPU(dataType, gradOutput, gradBias);
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
   void* gradOutput_ptr = tensorPointer(dataType, gradOutput, 0, 1, 0);

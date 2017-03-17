@@ -10,6 +10,7 @@ on an NVIDIA GPU with compute capability >= 2.0.
 
 import sys
 from ._utils import _import_dotted_name
+from .version import __version__
 
 __all__ = [
     'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
@@ -29,6 +30,13 @@ __all__ = [
 # modules against the _C shared object. Their missing THP symbols will be
 # automatically filled by the dynamic loader.
 import os as _dl_flags
+
+# if we have numpy, it *must* be imported before the call to setdlopenflags()
+# or there is risk that later c modules will segfault when importing numpy
+try:
+    import numpy as np
+except:
+    pass
 
 # first check if the os package has the required flags
 if not hasattr(_dl_flags, 'RTLD_GLOBAL') or not hasattr(_dl_flags, 'RTLD_NOW'):
@@ -75,10 +83,20 @@ def typename(o):
 
 
 def is_tensor(obj):
+    r"""Returns True if `obj` is a pytorch tensor.
+
+    Args:
+        obj (Object): Object to test
+    """
     return obj.__class__ in _tensor_classes
 
 
 def is_storage(obj):
+    r"""Returns True if `obj` is a pytorch storage object.
+
+    Args:
+        obj (Object): Object to test
+    """
     return obj.__class__ in _storage_classes
 
 
@@ -140,6 +158,10 @@ class FloatStorage(_C.FloatStorageBase, _StorageBase):
     pass
 
 
+class HalfStorage(_C.HalfStorageBase, _StorageBase):
+    pass
+
+
 class LongStorage(_C.LongStorageBase, _StorageBase):
     pass
 
@@ -178,6 +200,16 @@ class FloatTensor(_C.FloatTensorBase, _TensorBase):
     @classmethod
     def storage_type(cls):
         return FloatStorage
+
+
+class HalfTensor(_C.HalfTensorBase, _TensorBase):
+
+    def is_signed(self):
+        return True
+
+    @classmethod
+    def storage_type(cls):
+        return HalfStorage
 
 
 class LongTensor(_C.LongTensorBase, _TensorBase):

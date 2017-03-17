@@ -6,7 +6,7 @@ THC_API accreal
 THCTensor_(dot)(THCState *state, THCTensor *self, THCTensor *src)
 {
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
-  THAssert(THCTensor_(checkGPU)(state, 2, self, src));
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
   THArgCheck(THCTensor_(nElement)(state, self) ==
              THCTensor_(nElement)(state, src), 2, "sizes do not match");
 
@@ -44,7 +44,7 @@ THC_API void
 THCTensor_(addmv)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real alpha, THCTensor *mat, THCTensor *vec)
 {
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
-  THAssert(THCTensor_(checkGPU)(state, 4, r_, t, mat, vec));
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, r_, t, mat, vec));
   if( (mat->nDimension != 2) || (vec->nDimension != 1) )
     THError("matrix and vector expected");
 
@@ -135,7 +135,7 @@ THC_API void
 THCTensor_(addr)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real alpha, THCTensor *vec1, THCTensor *vec2)
 {
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
-  THAssert(THCTensor_(checkGPU)(state, 4, r_, t, vec1, vec2));
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, r_, t, vec1, vec2));
   if ( (vec1->nDimension != 1) || (vec2->nDimension != 1) ) {
     THError("vector and vector expected");
   }
@@ -227,7 +227,7 @@ THCTensor_(addmm)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real 
 {
 #if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
 
-  THAssert(THCTensor_(checkGPU)(state, 4, r_, t, m1, m2));
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, r_, t, m1, m2));
   char transpose_r, transpose_m1, transpose_m2;
   THCTensor *r__, *m1_, *m2_;
 
@@ -378,7 +378,7 @@ THC_API void
 THCTensor_(addbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
                    real alpha, THCTensor *batch1, THCTensor *batch2) {
 #if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
-  THAssert(THCTensor_(checkGPU)(state, 4, result, t, batch1, batch2));
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, result, t, batch1, batch2));
   THArgCheck(THCTensor_(nDimension)(state, t) == 2, 4, "expected 2D tensor");
   THArgCheck(THCTensor_(nDimension)(state, batch1) == 3, 6, "expected 3D tensor");
   THArgCheck(THCTensor_(nDimension)(state, batch2) == 3, 7, "expected 3D tensor");
@@ -424,14 +424,14 @@ __global__ void createBatchGemmBuffer(const real** buffer, real* data,
   const long idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx < num_batches) {
     buffer[idx] = data + idx * stride;
-   }
+  }
 }
 
 THC_API void
 THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
                     real alpha, THCTensor *batch1, THCTensor *batch2) {
-#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
-  THAssert(THCTensor_(checkGPU)(state, 4, result, t, batch1, batch2));
+#if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, result, t, batch1, batch2));
   THArgCheck(THCTensor_(nDimension)(state, t) == 3, 4, "expected 3D tensor");
   THArgCheck(THCTensor_(nDimension)(state, batch1) == 3, 6, "expected 3D tensor");
   THArgCheck(THCTensor_(nDimension)(state, batch2) == 3, 7, "expected 3D tensor");
@@ -522,8 +522,10 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
     ldb = batch2_->stride[1];
   }
 
-  // Compute pointers to matrices in each batch.
   long num_batches = result_->size[0];
+
+#if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
+  // Compute pointers to matrices in each batch.
   size_t matrices_size = num_batches * sizeof(real*);
 
   // Copy pointers to device.
@@ -579,6 +581,24 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
   THCudaFree(state, d_matrices1);
   THCudaFree(state, d_matrices2);
   THCudaFree(state, d_result_matrices);
+
+#elif defined(THC_REAL_IS_HALF)
+  // Currently no HgemmBatched in Cublas
+  for (long i = 0; i < num_batches; ++i) {
+    THCudaBlas_Hgemm(
+        state,
+        transpose_batch1,
+        transpose_batch2,
+        result_->size[transpose_result ? 2 : 1],
+        result_->size[transpose_result ? 1 : 2],
+        batch1_->size[transpose_result ? 1 : 2],
+        alpha,
+        THCTensor_(data)(state, batch1_) + i * batch1_->stride[0], lda,
+        THCTensor_(data)(state, batch2_) + i * batch2_->stride[0], ldb,
+        beta,
+        THCTensor_(data)(state, result_) + i * result_->stride[0], ldc);
+  }
+#endif
 
   if (batch1_ != batch1) {
     THCTensor_(free)(state, batch1_);

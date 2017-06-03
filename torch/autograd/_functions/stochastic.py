@@ -24,7 +24,7 @@ class Multinomial(StochasticFunction):
             probs = probs.unsqueeze(0)
             samples = samples.unsqueeze(0)
         # normalize probs (multinomial accepts weights)
-        probs /= probs.sum(1).expand_as(probs)
+        probs /= probs.sum(1, True).expand_as(probs)
         grad_probs = probs.new().resize_as_(probs).zero_()
         output_probs = probs.gather(1, samples)
         output_probs.add_(1e-6).reciprocal_()
@@ -83,8 +83,9 @@ class Normal(StochasticFunction):
             stddevs_cb = stddevs_sq * stddevs
             stddevs_sq += 1e-6
             stddevs_cb += 1e-6
-            grad_stddevs = (grad_means * grad_means) / stddevs_cb
-            grad_stddevs = (stddevs - grad_stddevs) * reward
+            grad_stddevs = (stddevs_sq - (grad_means * grad_means))
+            grad_stddevs /= stddevs_cb
+            grad_stddevs *= reward
             grad_means /= stddevs_sq
         grad_means *= reward
         return grad_means, grad_stddevs

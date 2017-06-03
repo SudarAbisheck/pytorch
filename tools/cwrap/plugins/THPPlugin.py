@@ -15,9 +15,11 @@ class THPPlugin(CWrapPlugin):
         'THTensor*': Template('((THPTensor*)$arg)->cdata'),
         'THBoolTensor*': Template('((THPBoolTensor*)$arg)->cdata'),
         'THIndexTensor*': Template('((THPIndexTensor*)$arg)->cdata'),
+        'THIntegerTensor*': Template('((THPIntegerTensor*)$arg)->cdata'),
 
         'THCudaTensor*': Template('((THCPFloatTensor*)$arg)->cdata'),
         'THCudaDoubleTensor*': Template('((THCPDoubleTensor*)$arg)->cdata'),
+        'THCudaIntTensor*': Template('((THCPIntTensor*)$arg)->cdata'),
         'THCudaLongTensor*': Template('((THCPLongTensor*)$arg)->cdata'),
 
         'THSFloatTensor*': Template('((THSPFloatTensor*)$arg)->cdata'),
@@ -51,9 +53,11 @@ class THPPlugin(CWrapPlugin):
         'THTensor*': Template('(PyObject*)Py_TYPE($arg) == THPTensorClass'),
         'THBoolTensor*': Template('(PyObject*)Py_TYPE($arg) == THPBoolTensorClass'),
         'THIndexTensor*': Template('(PyObject*)Py_TYPE($arg) == THPIndexTensorClass'),
+        'THIntegerTensor*': Template('(PyObject*)Py_TYPE($arg) == THPIntegerTensorClass'),
 
         'THCudaTensor*': Template('(PyObject*)Py_TYPE($arg) == THCPFloatTensorClass'),
         'THCudaDoubleTensor*': Template('(PyObject*)Py_TYPE($arg) == THCPDoubleTensorClass'),
+        'THCudaIntTensor*': Template('(PyObject*)Py_TYPE($arg) == THCPIntTensorClass'),
         'THCudaLongTensor*': Template('(PyObject*)Py_TYPE($arg) == THCPLongTensorClass'),
 
         'THSDoubleTensor*': Template('(PyObject*)Py_TYPE($arg) == THSPDoubleTensorClass'),
@@ -84,8 +88,10 @@ class THPPlugin(CWrapPlugin):
     RETURN_WRAPPER = {
         'THTensor*': Template('return THPTensor_(New)($result);'),
         'THSTensor*': Template('return THSPTensor_(New)($result);'),
+        'THIndexTensor*': Template('return THPIndexTensor_(New)($result);'),
         'THLongTensor*': Template('return THPLongTensor_New($result);'),
         'THLongStorage*': Template('return THPLongStorage_New($result);'),
+        'THCudaIntTensor*': Template('return THCPIntTensor_New($result);'),
         'THCudaLongTensor*': Template('return THCPLongTensor_New($result);'),
         # TODO: make it smarter - it should return python long if result doesn't fit into an int
         'long': Template('return PyInt_FromLong($result);'),
@@ -121,7 +127,7 @@ PyObject * $name(PyObject *self, PyObject *args, PyObject *kwargs)
     """)
 
     ALLOCATE_TMPL = Template("""\
-THP${type}TensorPtr _${name}_guard = (THP${type}Tensor*) THP${type}Tensor_NewEmpty();
+THP${type}TensorPtr _${name}_guard((THP${type}Tensor*) THP${type}Tensor_NewEmpty());
 if (!_${name}_guard.get()) return NULL;
 THP${type}Tensor* $name = _${name}_guard.get();
 """)
@@ -152,6 +158,7 @@ ${cpu}
         'THIntTensor*': _allocate('Int', ALLOCATE_TMPL),
         'THBoolTensor*': _allocate('Byte', ALLOCATE_TMPL, ALLOCATE_CUDA),
         'THIndexTensor*': _allocate('Long', ALLOCATE_TMPL, ALLOCATE_CUDA),
+        'THIntegerTensor*': _allocate('Int', ALLOCATE_TMPL, ALLOCATE_CUDA),
 
         'THSTensor*': _allocate('', ALLOCATE_TMPL, sparse=True),
     }
@@ -166,10 +173,12 @@ ${cpu}
         'THIntTensor*': '" THPModuleStr "IntTensor',
         'THBoolTensor*': '" THPModuleStr "ByteTensor',
         'THIndexTensor*': '" THPModuleStr "LongTensor',
+        'THIntegerTensor*': '" THPModuleStr "IntTensor',
         'THFloatTensor*': '" THPModuleStr "FloatTensor',
         'THDoubleTensor*': '" THPModuleStr "DoubleTensor',
         'THCudaTensor*': 'torch.cuda.FloatTensor',
         'THCudaDoubleTensor*': 'torch.cuda.DoubleTensor',
+        'THCudaIntTensor*': 'torch.cuda.IntTensor',
         'THCudaLongTensor*': 'torch.cuda.LongTensor',
         'THSize*': 'torch.Size',
         'THStride*': 'tuple',
@@ -178,10 +187,12 @@ ${cpu}
         'double': 'float',
         'accreal': '" RealStr "',
         'bool': 'bool',
+        'const char*': 'bool',  # Can come only from bool option.
     }
 
     OUT_INIT = """
     __out = kwargs ? PyDict_GetItemString(kwargs, "out") : NULL;
+    if (__out == Py_None) { __out = NULL; __dictcount--; __argcount--; }
     """
 
     def __init__(self):
@@ -348,6 +359,9 @@ ${cpu}
             for option in declaration['options']:
                 option['cname'] = 'TH{}Tensor_({})'.format(
                     'S' if option.get('sparse', False) else '', option['cname'])
+                if option.get('sparse', False):
+                    defined_if = option.get('defined_if', '')
+                    option['defined_if'] = '!IS_DISTRIBUTED' + (' && ' if defined_if else '') + defined_if
             if declaration.get('with_stateless', False) or declaration.get('only_stateless', False):
                 stateless_declaration = self.make_stateless(declaration)
                 new_declarations.append(stateless_declaration)
@@ -381,6 +395,7 @@ ${cpu}
         for option in declaration['options']:
             for arg in option['arguments']:
                 if arg['name'] == 'self':
+                    arg['assign_name'] = 'self'
                     arg['name'] = 'source'
         return declaration
 
@@ -408,7 +423,7 @@ ${cpu}
             sparse=('' if not sparse else 'S'),
         )
         if sparse:
-            generated = '#ifndef TH_REAL_IS_HALF\n' + generated + '\n#endif\n\n'
+            generated = '#if !defined(TH_REAL_IS_HALF) && !IS_DISTRIBUTED\n' + generated + '\n#endif\n\n'
         return generated
 
     def process_full_file(self, code):
@@ -430,7 +445,7 @@ ${cpu}
             return self.preprocessor_guard(code, declaration['defined_if'])
         return code
 
-    def process_all_unpacks(self, code, option):
+    def process_all_call_arg(self, code, option):
         return 'LIBRARY_STATE ' + code
 
     def process_all_checks(self, code, option):
@@ -454,7 +469,18 @@ ${cpu}
 
         return code
 
-    def process_option_code_template(self, template, option):
+    def process_option_code(self, code, option):
+        if option.get('defined_if', ''):
+            defined_if = option['defined_if']
+            placeholder = ''
+            # This means that it's a first option, so we need a dummy if,
+            # so the next option can be an else if.
+            if 'else if' not in code:
+                placeholder = '\n    #else\n    if (false) {'
+            return '#if ' + defined_if + '\n          ' + code + placeholder + '\n    #endif\n'
+        return code
+
+    def process_pre_arg_assign(self, template, option):
         new_args = []
         for arg in option['arguments']:
             if not option.get('output_provided', True) and arg.get('output'):

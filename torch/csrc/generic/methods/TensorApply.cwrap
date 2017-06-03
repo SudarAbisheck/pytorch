@@ -4,11 +4,12 @@
 #define BUILD_REAL_FMT "L"
 #endif
 
-#if !IS_CUDA
+#if !IS_CUDA && !IS_DISTRIBUTED
 [[
   name: THPTensor_(apply)
   python_name: apply_
-  defined_if: "!IS_CUDA"
+  defined_if: "!IS_CUDA && !IS_DISTRIBUTED"
+  cpu_half: True
   only_register: True
   override_method_flags: METH_O
 ]]
@@ -42,7 +43,8 @@ static PyObject * THPTensor_(apply)(THPTensor *self, PyObject *arg)
 [[
   name: THPTensor_(map)
   python_name: map_
-  defined_if: "!IS_CUDA"
+  defined_if: "!IS_CUDA && !IS_DISTRIBUTED"
+  cpu_half: True
   only_register: True
 ]]
 static PyObject * THPTensor_(map)(THPTensor *self, PyObject *args)
@@ -77,7 +79,8 @@ static PyObject * THPTensor_(map)(THPTensor *self, PyObject *args)
 [[
   name: THPTensor_(map2)
   python_name: map2_
-  defined_if: "!IS_CUDA"
+  defined_if: "!IS_CUDA && !IS_DISTRIBUTED"
+  cpu_half: True
   only_register: True
 ]]
 static PyObject * THPTensor_(map2)(THPTensor *self, PyObject *args)

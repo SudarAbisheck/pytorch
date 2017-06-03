@@ -3,7 +3,6 @@
 #include "THCHalfAutoNumerics.cuh"
 
 #include <cusparse.h>
-#include <thrust/device_vector.h>
 
 static cusparseHandle_t cusparse_handle = 0;
 
@@ -34,8 +33,8 @@ void THNN_CudaHalfSparseLinear_accGradParameters(
           THCudaHalfTensor *gradBias,
           THCudaHalfTensor *weight,
           THCudaHalfTensor *bias,
-          double weightDecay,
-          double scale) {
+          float weightDecay,
+          float scale) {
   THError("THCudaHalfTensor not supported with SparseLinear");
 }
 
@@ -56,8 +55,8 @@ void THNN_CudaHalfSparseLinear_legacyAccGradParameters(
           THCudaHalfTensor *gradBias,
           THCudaHalfTensor *weight,
           THCudaHalfTensor *bias,
-          double weightDecay,
-          double scale) {
+          float weightDecay,
+          float scale) {
   THError("THCudaHalfTensor not supported with SparseLinear");
 }
 
@@ -76,7 +75,7 @@ void THNN_CudaHalfSparseLinear_updateParameters(
           THCudaHalfTensor *gradWeight,
           THCudaHalfTensor *gradBias,
           THCudaHalfTensor *lastInput,
-          double learningRate) {
+          float learningRate) {
   THError("THCudaHalfTensor not supported with SparseLinear");
 }
 #endif

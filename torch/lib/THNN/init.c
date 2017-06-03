@@ -98,6 +98,9 @@
 #include "generic/LeakyReLU.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/FusedRNNKernel.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/LogSigmoid.c"
 #include "THGenerateFloatTypes.h"
 
@@ -147,6 +150,9 @@
 #include "THGenerateFloatTypes.h"
 
 #include "generic/SparseLinear.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/IndexLinear.c"
 #include "THGenerateFloatTypes.h"
 
 #include "generic/Sqrt.c"
@@ -200,6 +206,9 @@
 #include "generic/SpatialAdaptiveMaxPooling.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/SpatialAdaptiveAveragePooling.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/SpatialAveragePooling.c"
 #include "THGenerateFloatTypes.h"
 
@@ -243,6 +252,9 @@
 #include "THGenerateFloatTypes.h"
 
 #include "generic/VolumetricDilatedMaxPooling.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/VolumetricFractionalMaxPooling.c"
 #include "THGenerateFloatTypes.h"
 
 #include "generic/VolumetricMaxUnpooling.c"

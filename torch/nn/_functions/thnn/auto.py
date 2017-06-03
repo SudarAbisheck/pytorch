@@ -143,6 +143,9 @@ def _make_function_class(class_name, update_output, update_grad_input, acc_grad_
         else:
             self.save_for_backward(input, *params)
 
+        if not self.requires_grad:
+            del self.buffers
+
         getattr(self._backend, update_output.name)(self._backend.library_state, input, output, *args)
         return output
 
@@ -161,10 +164,11 @@ def _make_function_class(class_name, update_output, update_grad_input, acc_grad_
                 additional_args = (output,) + additional_args
 
             if is_inplace and self.inplace:
-                grad_output = grad_output.clone()
-                grad_input = grad_output.new()
-            else:
-                grad_input = input.new().resize_as_(input).zero_()
+                assert additional_args[-1] is True
+                tmp_args = list(additional_args)
+                tmp_args[-1] = False
+                additional_args = tuple(tmp_args)
+            grad_input = input.new().resize_as_(input)
             params_without_bias = params if len(params) < 2 else params[:1]
             update_grad_input_fn = getattr(self._backend, update_grad_input.name)
             gi_args = params_without_bias + additional_args
@@ -196,6 +200,7 @@ def _generate_function_classes(scope_dict):
     classes_to_generate = {fn.name.partition('_')[0] for fn in function_list}
     exceptions = {
         'Linear',
+        'IndexLinear',
         'SpatialFullConvolution',
         'SpatialConvolutionMM',
         'SparseLinear',
@@ -204,6 +209,8 @@ def _generate_function_classes(scope_dict):
         'SpatialMaxPooling',
         'SpatialDilatedMaxPooling',
         'SpatialMaxUnpooling',
+        'SpatialAdaptiveMaxPooling',
+        'SpatialAdaptiveAveragePooling',
         'VolumetricAveragePooling',
         'VolumetricMaxPooling',
         'VolumetricMaxUnpooling',
@@ -215,6 +222,9 @@ def _generate_function_classes(scope_dict):
         'LookupTable',
         'PReLU',
         'RReLU',
+        'Threshold',
+        'GRUFused',
+        'LSTMFused',
         'unfolded',
     }
     name_remap = {
@@ -242,6 +252,7 @@ def _generate_function_classes(scope_dict):
         'SmoothL1Criterion': 'SmoothL1Loss',
         'SoftMarginCriterion': 'SoftMarginLoss',
     }
+
     classes_to_generate -= exceptions
     for fn in classes_to_generate:
         update_output = function_by_name[fn + '_updateOutput']

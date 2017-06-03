@@ -51,7 +51,9 @@ void THNN_(TemporalSubSampling_updateOutput)(
   THTensor *outputFrame, *inputWindow;
   int nInputFrame, nOutputFrame;
   long k;
-  
+
+  THArgCheck(THTensor_(isContiguous)(weight), 4, "weight must be contiguous");
+  THArgCheck(!bias || THTensor_(isContiguous)(bias), 4, "bias must be contiguous");
   THNN_(TemporalSubSampling_shapeCheck)(state, input, NULL, kW, dW, &inputFrameSize);
 
   outputFrame = THTensor_(new)();
@@ -63,12 +65,12 @@ void THNN_(TemporalSubSampling_updateOutput)(
   THTensor_(resize2d)(output,
                       nOutputFrame,
                       inputFrameSize);
-  
+
   for(k = 0; k < nOutputFrame; k++)
   {
     THTensor_(narrow)(inputWindow, input, 0, k*dW, kW);
     THTensor_(select)(outputFrame, output, 0, k);
-    THTensor_(sum)(outputFrame, inputWindow, 0);
+    THTensor_(sum)(outputFrame, inputWindow, 0, 1);
     THTensor_(cmul)(outputFrame, outputFrame, weight);
     THTensor_(cadd)(outputFrame, outputFrame, 1, bias);
   }
@@ -91,6 +93,7 @@ void THNN_(TemporalSubSampling_updateGradInput)(
   THTensor *gradInputWindow, *buffer, *kwunit;
   long k;
 
+  THArgCheck(THTensor_(isContiguous)(weight), 4, "weight must be contiguous");
   THNN_(TemporalSubSampling_shapeCheck)(state, input, gradOutput, kW, dW, NULL);
 
   gradOutputFrame = THTensor_(new)();
@@ -124,8 +127,9 @@ void THNN_(TemporalSubSampling_accGradParameters)(
           THTensor *gradBias,
           int kW,
           int dW,
-          real scale)
+          accreal scale_)
 {
+  real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
   THTensor *gradOutputFrame;
   THTensor *inputWindow, *buffer;
   long k;
@@ -139,7 +143,7 @@ void THNN_(TemporalSubSampling_accGradParameters)(
   {
     THTensor_(narrow)(inputWindow, input, 0, k*dW, kW);
     THTensor_(select)(gradOutputFrame, gradOutput, 0, k);
-    THTensor_(sum)(buffer, inputWindow, 0);
+    THTensor_(sum)(buffer, inputWindow, 0, 1);
     THTensor_(addcmul)(gradWeight, gradWeight, scale, buffer, gradOutputFrame);
     THTensor_(cadd)(gradBias, gradBias, scale, gradOutputFrame);
   }

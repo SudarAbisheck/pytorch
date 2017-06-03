@@ -3,6 +3,7 @@ CMAKE_POLICY(VERSION 2.8)
 
 SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
 
+SET(CUDA_ATTACH_VS_BUILD_RULE_TO_CUDA_FILE OFF)
 OPTION(NDEBUG "disable asserts (WARNING: this may result in invalid memory accesses)")
 IF(NOT NDEBUG)
   MESSAGE(STATUS "Removing -DNDEBUG from compile flags")
@@ -50,6 +51,7 @@ IF(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     THCTensorRandom.cpp
     THCCachingAllocator.cpp
     THCCachingHostAllocator.cpp
+    THCStream.cpp
     PROPERTIES COMPILE_FLAGS -std=${CXX_VERSION})
 ELSE()
   SET(CMAKE_CXX_STANDARD 11)
@@ -58,6 +60,10 @@ ENDIF()
 
 INCLUDE_DIRECTORIES(${CUDA_INCLUDE_DIRS})
 INCLUDE_DIRECTORIES("${CUDA_SDK_ROOT_DIR}/common/inc")
+
+IF ("$ENV{STATIC_TH}" STREQUAL "YES")
+LIST(APPEND CUDA_NVCC_FLAGS "-Xcompiler -fPIC")
+ENDIF()
 
 IF(MAGMA_FOUND)
   INCLUDE_DIRECTORIES(${MAGMA_INCLUDE_DIR})
@@ -130,9 +136,9 @@ IF(NOT THC_INSTALL_BIN_SUBDIR
     SET(THC_INSTALL_CMAKE_SUBDIR ${Torch_INSTALL_CMAKE_SUBDIR})
   ELSE(Torch_INSTALL_BIN_SUBDIR)
     # not installing in a Torch context, so Torch_INSTALL_BIN_SUBDIR is not available
-    SET(THC_INSTALL_BIN_SUBDIR "bin" CACHE PATH "THC install binary subdirectory")           
-    SET(THC_INSTALL_LIB_SUBDIR "lib" CACHE PATH "THC install library subdirectory")                     
-    SET(THC_INSTALL_INCLUDE_SUBDIR "include" CACHE PATH "THC install include subdirectory")                     
+    SET(THC_INSTALL_BIN_SUBDIR "bin" CACHE PATH "THC install binary subdirectory")
+    SET(THC_INSTALL_LIB_SUBDIR "lib" CACHE PATH "THC install library subdirectory")
+    SET(THC_INSTALL_INCLUDE_SUBDIR "include" CACHE PATH "THC install include subdirectory")
     SET(THC_INSTALL_CMAKE_SUBDIR "share/cmake/THC" CACHE PATH "THC install cmake subdirectory")
   ENDIF(Torch_INSTALL_BIN_SUBDIR)
 
@@ -153,7 +159,7 @@ SET(src
     THCCachingHostAllocator.cpp
     THCGeneral.c
     THCStorageCopy.c
-    THCStream.c
+    THCStream.cpp
     THCTensor.c
     THCTensorCopy.c
     THCTensorRandom.cpp
@@ -182,6 +188,8 @@ SET(src-cuda
   THCTensorTopK.cu
   THCTensorSort.cu
   THCTensorTypeUtils.cu
+  THCSortUtils.cu
+  THCTensorMode.cu
   )
 
 # loop over all types
@@ -208,28 +216,33 @@ ELSE(CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
 ENDIF(CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
 
 MESSAGE(STATUS "CUDA_NVCC_FLAGS: ${CUDA_NVCC_FLAGS}")
+IF ("$ENV{STATIC_TH}" STREQUAL "YES")
+  CUDA_ADD_LIBRARY(THC STATIC ${src} ${src-cuda})
+  SET_TARGET_PROPERTIES(THC PROPERTIES COMPILE_FLAGS "-fPIC")
+ELSE()
+  CUDA_ADD_LIBRARY(THC SHARED ${src} ${src-cuda})
+  CUDA_ADD_CUBLAS_TO_TARGET(THC)
+  TARGET_LINK_LIBRARIES(THC ${TH_LIBRARIES} ${CUDA_curand_LIBRARY} ${CUDA_cusparse_LIBRARY})
 
-CUDA_ADD_LIBRARY(THC SHARED ${src} ${src-cuda})
-CUDA_ADD_CUBLAS_TO_TARGET(THC)
-TARGET_LINK_LIBRARIES(THC ${TH_LIBRARIES} ${CUDA_curand_LIBRARY})
+  IF(USE_MAGMA)
+    TARGET_LINK_LIBRARIES(THC ${MAGMA_LIBRARIES})
+  ENDIF(USE_MAGMA)
 
-IF(USE_MAGMA)
-  TARGET_LINK_LIBRARIES(THC ${MAGMA_LIBRARIES} ${CUDA_cusparse_LIBRARY})
-ENDIF(USE_MAGMA)
-
-IF(NOT THC_SO_VERSION)
-  SET(THC_SO_VERSION 0)
-ENDIF(NOT THC_SO_VERSION)
-MESSAGE(STATUS "THC_SO_VERSION: ${THC_SO_VERSION}")
-SET_TARGET_PROPERTIES(THC PROPERTIES
-  VERSION   ${THC_SO_VERSION}
-  SOVERSION ${THC_SO_VERSION})
+  IF(NOT THC_SO_VERSION)
+    SET(THC_SO_VERSION 0)
+  ENDIF(NOT THC_SO_VERSION)
+  MESSAGE(STATUS "THC_SO_VERSION: ${THC_SO_VERSION}")
+  SET_TARGET_PROPERTIES(THC PROPERTIES
+    VERSION   ${THC_SO_VERSION}
+    SOVERSION ${THC_SO_VERSION})
 
 
-INSTALL(TARGETS THC
-          RUNTIME DESTINATION "${THC_INSTALL_BIN_SUBDIR}"
-          LIBRARY DESTINATION "${THC_INSTALL_LIB_SUBDIR}"
-          ARCHIVE DESTINATION "${THC_INSTALL_LIB_SUBDIR}")
+  INSTALL(TARGETS THC
+    RUNTIME DESTINATION "${THC_INSTALL_BIN_SUBDIR}"
+    LIBRARY DESTINATION "${THC_INSTALL_LIB_SUBDIR}"
+    ARCHIVE DESTINATION "${THC_INSTALL_LIB_SUBDIR}")
+ENDIF()
+
 
 INSTALL(FILES
           THC.h
@@ -245,7 +258,6 @@ INSTALL(FILES
           THCTensorRandom.h
           THCTensorMath.h
           THCTensorConv.h
-          THCTensorTopK.h
           THCApply.cuh
           THCReduce.cuh
           THCReduceAll.cuh
@@ -276,10 +288,13 @@ INSTALL(FILES
           THCNumerics.cuh
           THCTensorSort.cuh
           THCTensorInfo.cuh
+          THCTensorMathPointwise.cuh
           THCTensorTypeUtils.cuh
           THCTensorRandom.cuh
           THCTensorMathMagma.cuh
           THCThrustAllocator.cuh
+          THCTensorMode.cuh
+          THCTensorTopK.cuh
           DESTINATION "${THC_INSTALL_INCLUDE_SUBDIR}/THC")
 
 INSTALL(FILES
@@ -324,4 +339,8 @@ INSTALL(FILES
           generic/THCDeviceTensorUtils.cu
           generic/THCTensorRandom.h
           generic/THCTensorRandom.cu
+          generic/THCTensorMode.h
+          generic/THCTensorMode.cu
+          generic/THCTensorTopK.h
+          generic/THCTensorTopK.cu
           DESTINATION "${THC_INSTALL_INCLUDE_SUBDIR}/THC/generic")

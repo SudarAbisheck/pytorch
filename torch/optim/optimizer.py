@@ -57,7 +57,7 @@ class Optimizer(object):
                 if not param.requires_grad:
                     raise ValueError("optimizing a parameter that doesn't "
                                      "require gradients")
-                if param.creator is not None:
+                if not param.is_leaf:
                     raise ValueError("can't optimize a non-leaf Variable")
 
     def __getstate__(self):
@@ -65,6 +65,9 @@ class Optimizer(object):
             'state': self.state,
             'param_groups': self.param_groups,
         }
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
 
     def state_dict(self):
         """Returns the state of the optimizer as a :class:`dict`.
@@ -115,20 +118,26 @@ class Optimizer(object):
         id_map = {old_id: p for old_id, p in
                   zip(chain(*(g['params'] for g in saved_groups)),
                       chain(*(g['params'] for g in groups)))}
-        self.state = {id_map.get(k, k): v for k, v in state_dict['state'].items()}
+        state = {id_map.get(k, k): v for k, v in state_dict['state'].items()}
 
         # Update parameter groups, setting their 'params' value
         def update_group(group, new_group):
             new_group['params'] = group['params']
             return new_group
-        self.param_groups = [
+        param_groups = [
             update_group(g, ng) for g, ng in zip(groups, saved_groups)]
+        self.__setstate__({'state': state, 'param_groups': param_groups})
 
     def zero_grad(self):
         """Clears the gradients of all optimized :class:`Variable` s."""
         for group in self.param_groups:
-            for param in group['params']:
-                param.grad.data.zero_()
+            for p in group['params']:
+                if p.grad is not None:
+                    if p.grad.volatile:
+                        p.grad.data.zero_()
+                    else:
+                        data = p.grad.data
+                        p.grad = Variable(data.new().resize_as_(data).zero_())
 
     def step(self, closure):
         """Performs a single optimization step (parameter update).

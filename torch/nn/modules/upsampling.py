@@ -11,9 +11,9 @@ class _UpsamplingBase(Module):
         super(_UpsamplingBase, self).__init__()
         if size is None and scale_factor is None:
             raise ValueError('either size or scale_factor should be defined')
-        if scale_factor is not None and not isinstance(scale_factor, Integral):
-            raise ValueError('scale_factor must be of integer type')
-        self.size = _pair(size)
+        if scale_factor is not None and not isinstance(scale_factor, (Integral, tuple)):
+            raise ValueError('scale_factor must be of integer type or tuple of integer types')
+        self.size = size
         self.scale_factor = scale_factor
 
     def __repr__(self):
@@ -41,29 +41,35 @@ class UpsamplingNearest2d(_UpsamplingBase):
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
         - Output: :math:`(N, C, H_{out}, W_{out})` where
-          :math:`H_{out} = floor((H_{in} * scale_factor`
-          :math:`W_{out} = floor((W_{in}  * scale_factor`
+          :math:`H_{out} = floor(H_{in} * scale\_factor)`
+          :math:`W_{out} = floor(W_{in}  * scale\_factor)`
 
     Examples::
 
-    >>> inp
-    Variable containing:
-    (0 ,0 ,.,.) =
-      1  2
-      3  4
-    [torch.FloatTensor of size 1x1x2x2]
+        >>> inp
+        Variable containing:
+        (0 ,0 ,.,.) =
+          1  2
+          3  4
+        [torch.FloatTensor of size 1x1x2x2]
 
-    >>> m = nn.UpsamplingNearest2d(scale_factor=2)
-    >>> m(inp)
-    Variable containing:
-    (0 ,0 ,.,.) =
-      1  1  2  2
-      1  1  2  2
-      3  3  4  4
-      3  3  4  4
-    [torch.FloatTensor of size 1x1x4x4]
+        >>> m = nn.UpsamplingNearest2d(scale_factor=2)
+        >>> m(inp)
+        Variable containing:
+        (0 ,0 ,.,.) =
+          1  1  2  2
+          1  1  2  2
+          3  3  4  4
+          3  3  4  4
+        [torch.FloatTensor of size 1x1x4x4]
 
     """
+
+    def __init__(self, size=None, scale_factor=None):
+        super(UpsamplingNearest2d, self).__init__(size, scale_factor)
+        if self.scale_factor is not None and not isinstance(scale_factor, Integral):
+            raise ValueError('scale_factor must be of integer type for neighest neighbor sampling')
+        self.size = _pair(self.size) if self.size is not None else None
 
     def forward(self, input):
         return F.upsample_nearest(input, self.size, self.scale_factor)
@@ -86,29 +92,36 @@ class UpsamplingBilinear2d(_UpsamplingBase):
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
         - Output: :math:`(N, C, H_{out}, W_{out})` where
-          :math:`H_{out} = floor((H_{in} * scale_factor`
-          :math:`W_{out} = floor((W_{in}  * scale_factor`
+          :math:`H_{out} = floor(H_{in} * scale\_factor)`
+          :math:`W_{out} = floor(W_{in}  * scale\_factor)`
 
     Examples::
 
-    >>> inp
-    Variable containing:
-    (0 ,0 ,.,.) =
-      1  2
-      3  4
-    [torch.FloatTensor of size 1x1x2x2]
+        >>> inp
+        Variable containing:
+        (0 ,0 ,.,.) =
+          1  2
+          3  4
+        [torch.FloatTensor of size 1x1x2x2]
 
-    >>> m = nn.UpsamplingBilinear2d(scale_factor=2)
-    >>> m(inp)
-    Variable containing:
-    (0 ,0 ,.,.) =
-      1.0000  1.3333  1.6667  2.0000
-      1.6667  2.0000  2.3333  2.6667
-      2.3333  2.6667  3.0000  3.3333
-      3.0000  3.3333  3.6667  4.0000
-    [torch.FloatTensor of size 1x1x4x4]
+        >>> m = nn.UpsamplingBilinear2d(scale_factor=2)
+        >>> m(inp)
+        Variable containing:
+        (0 ,0 ,.,.) =
+          1.0000  1.3333  1.6667  2.0000
+          1.6667  2.0000  2.3333  2.6667
+          2.3333  2.6667  3.0000  3.3333
+          3.0000  3.3333  3.6667  4.0000
+        [torch.FloatTensor of size 1x1x4x4]
 
     """
+
+    def __init__(self, size=None, scale_factor=None):
+        super(UpsamplingBilinear2d, self).__init__(size, scale_factor)
+
+        if self.scale_factor is not None:
+            self.scale_factor = F._check_bilinear_2d_scale_factor(self.scale_factor)
+        self.size = _pair(self.size) if self.size is not None else None
 
     def forward(self, input):
         return F.upsample_bilinear(input, self.size, self.scale_factor)

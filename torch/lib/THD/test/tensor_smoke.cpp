@@ -2,14 +2,14 @@
 #include <cassert>
 #include <typeinfo>
 
-#include "../base/tensors/THTensor.hpp"
+#include <THPP/tensors/THTensor.hpp>
 
 using namespace std;
 
 
 int main() {
-    thd::FloatTensor *tensor = new thd::THTensor<float>();
-  thd::FloatTensor *tensor2 = new thd::THTensor<float>();
+  thpp::FloatTensor *tensor = new thpp::THTensor<float>();
+  thpp::FloatTensor *tensor2 = new thpp::THTensor<float>();
   assert(tensor->nDim() == 0);
 
   tensor->resize({1, 2, 3});
@@ -31,7 +31,7 @@ int main() {
 
   bool thrown = false;
   try {
-      thd::IntTensor &a = dynamic_cast<thd::IntTensor&>(*tensor);
+    thpp::IntTensor &a = dynamic_cast<thpp::IntTensor&>(*tensor);
   } catch(std::bad_cast &e) {
     thrown = true;
   }

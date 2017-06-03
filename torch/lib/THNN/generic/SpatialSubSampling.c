@@ -10,6 +10,7 @@ static inline void THNN_(SpatialSubSampling_shapeCheck)(
   int ndims = input->nDimension;
   THNN_ARGCHECK(input->nDimension == 3 || input->nDimension == 4, 2, input,
                   "3D or 4D input tensor expected but got: %s");
+  THArgCheck(THTensor_(isContiguous)(weight), 4, "weight must be contiguous");
 
   int nInputPlane = THTensor_(size)(weight, 0);
 
@@ -40,7 +41,8 @@ void THNN_(SpatialSubSampling_updateOutput)(
     int kW, int kH,
     int dW, int dH)
 {
-  
+  THArgCheck(!bias || THTensor_(isContiguous)(bias), 5, "bias must be contiguous");
+
   real *weight_data = THTensor_(data)(weight);
   real *bias_data = THTensor_(data)(bias);
   real *output_data;
@@ -76,11 +78,11 @@ void THNN_(SpatialSubSampling_updateOutput)(
     THTensor_(resize3d)(output, nInputPlane, outputHeight, outputWidth);
   else
     THTensor_(resize4d)(output, input->size[0], nInputPlane, outputHeight, outputWidth);
-  
+
   input = THTensor_(newContiguous)(input);
   input_data = THTensor_(data)(input);
   output_data = THTensor_(data)(output);
-  
+
 #pragma omp parallel for private(k)
   for(k = 0; k < nInputPlane; k++)
   {
@@ -97,7 +99,7 @@ void THNN_(SpatialSubSampling_updateOutput)(
       long i;
       for(i = 0; i < outputWidth*outputHeight; i++)
         ptr_output[i] = z;
-      
+
       for(yy = 0; yy < outputHeight; yy++)
       {
         for(xx = 0; xx < outputWidth; xx++)
@@ -214,8 +216,9 @@ void THNN_(SpatialSubSampling_accGradParameters)(
     THTensor *gradBias,
     int kW, int kH,
     int dW, int dH,
-    real scale)
+    accreal scale_)
 {
+  real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
   THNN_(SpatialSubSampling_shapeCheck)(input, gradOutput, gradWeight, kW, kH);
 
   long nbatch = 1;

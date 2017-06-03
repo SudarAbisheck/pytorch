@@ -6,9 +6,9 @@ import shutil
 import random
 import tempfile
 import unittest
-import sys
 import traceback
 import torch
+import torch.utils.data
 import torch.cuda
 import warnings
 from torch.autograd import Variable
@@ -19,7 +19,7 @@ from torch.utils.serialization import load_lua
 
 HAS_CUDA = torch.cuda.is_available()
 
-from common import TestCase, run_tests
+from common import TestCase, run_tests, download_file
 
 try:
     import cffi
@@ -106,6 +106,44 @@ class DatasetMock(object):
 
     def __len__(self):
         return 10
+
+
+class TestDataLoader(TestCase):
+    def setUp(self):
+        self.dataset = torch.randn(5, 3, 3, 2)
+        self.batch_size = 3
+
+    def test_single_keep(self):
+        dataloader = torch.utils.data.DataLoader(self.dataset,
+                                                 batch_size=self.batch_size,
+                                                 num_workers=0,
+                                                 drop_last=False)
+        dataiter = iter(dataloader)
+        self.assertEqual(len(list(dataiter)), 2)
+
+    def test_single_drop(self):
+        dataloader = torch.utils.data.DataLoader(self.dataset,
+                                                 batch_size=self.batch_size,
+                                                 num_workers=0,
+                                                 drop_last=True)
+        dataiter = iter(dataloader)
+        self.assertEqual(len(list(dataiter)), 1)
+
+    def test_multi_keep(self):
+        dataloader = torch.utils.data.DataLoader(self.dataset,
+                                                 batch_size=self.batch_size,
+                                                 num_workers=2,
+                                                 drop_last=False)
+        dataiter = iter(dataloader)
+        self.assertEqual(len(list(dataiter)), 2)
+
+    def test_multi_drop(self):
+        dataloader = torch.utils.data.DataLoader(self.dataset,
+                                                 batch_size=self.batch_size,
+                                                 num_workers=2,
+                                                 drop_last=True)
+        dataiter = iter(dataloader)
+        self.assertEqual(len(list(dataiter)), 1)
 
 
 class TestTrainer(TestCase):
@@ -297,34 +335,12 @@ class TestLuaReader(TestCase):
         return do_test
 
     @classmethod
-    def _download_data(cls, test_file_path):
-        if os.path.exists(test_file_path):
-            return
-        print('Downloading test file for TestLuaReader.')
-        DATA_URL = 'https://s3.amazonaws.com/pytorch/legacy_modules.t7'
-        urllib = cls._get_urllib('request')
-        data = urllib.urlopen(DATA_URL, timeout=15).read()
-        with open(test_file_path, 'wb') as f:
-            f.write(data)
-
-    @staticmethod
-    def _get_urllib(submodule):
-        if sys.version_info < (3,):
-            import urllib2
-            return urllib2
-        else:
-            import urllib.error
-            import urllib.request
-            return getattr(urllib, submodule)
-
-    @classmethod
     def init(cls):
+        DATA_URL = 'https://download.pytorch.org/test_data/legacy_modules.t7'
         data_dir = os.path.join(os.path.dirname(__file__), 'data')
         test_file_path = os.path.join(data_dir, 'legacy_modules.t7')
-        urllib = cls._get_urllib('error')
-        try:
-            cls._download_data(test_file_path)
-        except urllib.URLError as e:
+        succ = download_file(DATA_URL, test_file_path)
+        if not succ:
             warnings.warn(("Couldn't download the test file for TestLuaReader! "
                            "Tests will be incomplete!"), RuntimeWarning)
             return

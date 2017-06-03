@@ -233,19 +233,19 @@ tests = [
                   reference_fn=lambda i, _: torch.bmm(i[0], i[1].view(i[1].size(0), i[1].size(1), 1)).squeeze()),
     OldModuleTest(nn.Max,
                   input_size=(4, 5, 3),
-                  reference_fn=lambda i, _: torch.max(i, 0)[0].squeeze()),
+                  reference_fn=lambda i, _: torch.max(i, 0, False)[0]),
     OldModuleTest(nn.Max,
                   (1,),
                   input_size=(4, 5, 3),
-                  reference_fn=lambda i, _: torch.max(i, 1)[0].squeeze(),
+                  reference_fn=lambda i, _: torch.max(i, 1, False)[0],
                   desc='with_dimension'),
     OldModuleTest(nn.Min,
                   input_size=(4, 5, 3),
-                  reference_fn=lambda i, _: torch.min(i, 0)[0].squeeze()),
+                  reference_fn=lambda i, _: torch.min(i, 0, False)[0]),
     OldModuleTest(nn.Min,
                   (1,),
                   input_size=(4, 5, 3),
-                  reference_fn=lambda i, _: torch.min(i, 1)[0].squeeze(),
+                  reference_fn=lambda i, _: torch.min(i, 1, False)[0],
                   desc='with_dimension'),
     OldModuleTest(nn.MixtureTable,
                   tuple(),
@@ -483,14 +483,14 @@ tests = [
                   input_size=(1, 2, 4, 4, 4)),
     OldModuleTest(nn.VolumetricMaxPooling,
                   (2, 2, 2),
-                  input_size=(2, 3, 5, 5, 5)),
+                  input=(torch.randn(2, 3, 5, 5, 5) * 1000)),
     OldModuleTest(nn.VolumetricMaxPooling,
                   (2, 2, 2, 2, 2, 2),
-                  input_size=(2, 3, 5, 5, 5),
+                  input=(torch.randn(2, 3, 5, 5, 5) * 1000),
                   desc='stride'),
     OldModuleTest(nn.VolumetricMaxPooling,
                   (2, 2, 2, 2, 2, 2, 1, 1, 1),
-                  input_size=(2, 3, 5, 5, 5),
+                  input=(torch.randn(2, 3, 5, 5, 5) * 1000),
                   desc='stride_padding'),
     OldModuleTest(nn.VolumetricReplicationPadding,
                   (1, 2, 3, 4, 5, 6),
@@ -532,7 +532,7 @@ for p in (1, 2, 1.5):
                       (p,),
                       input_size=(4, 5),
                       # Eh, we need to use p as a default, so it's passed by value
-                      reference_fn=lambda i, _, p=p: i.div(i.norm(p, 1).expand_as(i)),
+                      reference_fn=lambda i, _, p=p: i.div(i.norm(p, 1, True).expand_as(i)),
                       desc=str(p)),
     )
 for p in range(1, 4 + 1):
@@ -807,7 +807,7 @@ class TestNN(NNTestCase):
         str(m)
 
         output = m.forward(input)
-        output2 = input.sum(1).expand(4, 5).repeat(num_modules, 1)
+        output2 = input.sum(1, True).expand(4, 5).repeat(num_modules, 1)
         self.assertEqual(output2, output)
 
         gradInput = m.backward(input, torch.ones(output2.size()))
@@ -1154,6 +1154,15 @@ class TestNN(NNTestCase):
         module.__repr__()
         str(module)
 
+    def test_accUpdateGradParameters(self):
+        module = nn.LookupTable(5, 3)
+        module.weight.fill_(2)
+        input = torch.LongTensor([1, 3])
+        output = module.updateOutput(input)
+        module.backwardUpdate(input, output, 0.1)
+        self.assertEqual(module.weight[0, 0], 2)
+        self.assertEqual(module.weight[3, 0], 1.8)
+
     def _build_net(self):
         return (nn.Sequential()
                 .add(nn.Concat(0)
@@ -1242,6 +1251,8 @@ class TestNN(NNTestCase):
                 self.assertIsInstance(module, type(reference))
 
 
+prepare_tests()
+
+
 if __name__ == '__main__':
-    prepare_tests()
     run_tests()

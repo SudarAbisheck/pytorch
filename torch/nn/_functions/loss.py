@@ -9,12 +9,6 @@ class CosineEmbeddingLoss(Function):
         self.margin = margin
         self.size_average = size_average
 
-    def _new_idx(self, input):
-        if torch.typename(input) == 'torch.cuda.FloatTensor':
-            return torch.cuda.ByteTensor()
-        else:
-            return torch.ByteTensor()
-
     def forward(self, input1, input2, y):
         self.w1 = input1.new()
         self.w22 = input1.new()
@@ -22,21 +16,21 @@ class CosineEmbeddingLoss(Function):
         self.w32 = input1.new()
         self._outputs = input1.new()
 
-        _idx = self._new_idx(input1)
+        _idx = input1.new().byte()
 
         buffer = torch.mul(input1, input2)
-        torch.sum(buffer, 1, out=self.w1)
+        torch.sum(buffer, 1, out=self.w1, keepdim=True)
 
         epsilon = 1e-12
         torch.mul(input1, input1, out=buffer)
-        torch.sum(buffer, 1, out=self.w22).add_(epsilon)
+        torch.sum(buffer, 1, out=self.w22, keepdim=True).add_(epsilon)
 
         self._outputs.resize_as_(self.w22).fill_(1)
         torch.div(self._outputs, self.w22, out=self.w22)
         self.w.resize_as_(self.w22).copy_(self.w22)
 
         torch.mul(input2, input2, out=buffer)
-        torch.sum(buffer, 1, out=self.w32).add_(epsilon)
+        torch.sum(buffer, 1, out=self.w32, keepdim=True).add_(epsilon)
         torch.div(self._outputs, self.w32, out=self.w32)
         self.w.mul_(self.w32)
         self.w.sqrt_()
@@ -61,7 +55,7 @@ class CosineEmbeddingLoss(Function):
         v1, v2, y = self.saved_tensors
 
         buffer = v1.new()
-        _idx = self._new_idx(v1)
+        _idx = v1.new().byte()
 
         gw1 = grad_output.new()
         gw2 = grad_output.new()
@@ -90,9 +84,10 @@ class CosineEmbeddingLoss(Function):
             gw1.div_(y.size(0))
             gw2.div_(y.size(0))
 
-        if grad_output[0] != 1:
-            gw1.mul_(grad_output)
-            gw2.mul_(grad_output)
+        grad_output_val = grad_output[0]
+        if grad_output_val != 1:
+            gw1.mul_(grad_output_val)
+            gw2.mul_(grad_output_val)
 
         return gw1, gw2, None
 

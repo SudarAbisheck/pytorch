@@ -1,32 +1,13 @@
 import torch
 from . import _tensor_str
-from ._utils import _type, _cuda, _range
-from functools import reduce
-from itertools import chain
+from ._utils import _type, _cuda, _range, _rebuild_tensor
 import sys
-import math
-
-
-def _infer_sizes(sizes, total):
-    to_infer = -1
-    total_sizes = 1
-    for i, size in enumerate(sizes):
-        total_sizes *= size
-        if size == -1:
-            if to_infer >= 0:
-                raise RuntimeError
-            to_infer = i
-    if to_infer >= 0:
-        assert total % total_sizes == 0, "Can't make sizes have exactly %d elements" % total
-        sizes = list(sizes)
-        sizes[to_infer] = -total // total_sizes
-        return torch.Size(sizes)
-    return sizes
 
 
 class _TensorBase(object):
     #: bool: True if this is a CUDA tensor
     is_cuda = False
+    is_sparse = False
 
     def new(self, *args, **kwargs):
         """Constructs a new tensor of the same data type."""
@@ -123,7 +104,18 @@ class _TensorBase(object):
         return new_tensor
 
     def __reduce__(self):
-        return type(self), (self.tolist(),)
+        # NOTE: _rebuild_tensor does not call __setstate__
+        args = self.__getstate__()
+        return (_rebuild_tensor, args)
+
+    def __getstate__(self):
+        return (self.storage(),
+                self.storage_offset(),
+                tuple(self.size()),
+                self.stride())
+
+    def __setstate__(self, state):
+        self.set_(*state)
 
     def __repr__(self):
         return str(self)
@@ -153,14 +145,14 @@ class _TensorBase(object):
         return iter(map(lambda i: self.select(0, i), _range(self.size(0))))
 
     def split(self, split_size, dim=0):
-        """Splits this tensor into a list of tensors.
+        """Splits this tensor into a tuple of tensors.
 
         See :func:`torch.split`.
         """
         return torch.split(self, split_size, dim)
 
     def chunk(self, n_chunks, dim=0):
-        """Splits this tensor into a list of tensors.
+        """Splits this tensor into a tuple of tensors.
 
         See :func:`torch.chunk`.
         """
@@ -174,47 +166,6 @@ class _TensorBase(object):
         elif dim > 0:
             return [subt.tolist() for subt in self]
         return []
-
-    def view(self, *args):
-        """Returns a new tensor with the same data but different size.
-
-        The returned tensor shares the same data and must have the same number
-        of elements, but may have a different size. A tensor must be
-        :func:`contiguous` to be viewed.
-
-        Args:
-            args (torch.Size or int...): Desired size
-
-        Example:
-            >>> x = torch.randn(4, 4)
-            >>> x.size()
-            torch.Size([4, 4])
-            >>> y = x.view(16)
-            >>> y.size()
-            torch.Size([16])
-            >>> z = x.view(-1, 8)  # the size -1 is inferred from other dimensions
-            >>> z.size()
-            torch.Size([2, 8])
-        """
-        dst = self.new()
-        if len(args) == 1 and isinstance(args[0], torch.Size):
-            sizes = args[0]
-        else:
-            sizes = torch.Size(args)
-        sizes = _infer_sizes(sizes, self.nelement())
-        numel = reduce(lambda a, b: a * b, sizes) if len(sizes) > 0 else 0
-
-        if numel != self.nelement():
-            def format_size(size):
-                return 'x'.join(str(v) for v in size) if len(size) > 0 else '0'
-            raise ValueError(
-                "view of size '{0}' is invalid for input of size '{1}'"
-                .format(format_size(sizes), format_size(self.size())))
-        if not self.is_contiguous():
-            raise ValueError("input should be contiguous")
-        if self.storage() is not None:
-            dst.set_(self.storage(), self.storage_offset(), sizes)
-        return dst
 
     def view_as(self, tensor):
         """Returns this tensor viewed as the size as the specified tensor.
@@ -253,55 +204,6 @@ class _TensorBase(object):
                         break
                 perm[j] = -1
         return tensor
-
-    def expand(self, *sizes):
-        """Returns a new view of the tensor with singleton dimension expanded
-        to a larger size.
-
-        Expanding a tensor does not allocate new memory, but only creates a
-        new view on the existing tensor where a dimension of size one is
-        expanded to a larger size by setting the ``stride`` to 0. Any dimension
-        of size 1 can be expanded to an arbitrary value without allocating new
-        memory.
-
-        Args:
-            *sizes (torch.Size or int...): The desired expanded size
-
-        Example:
-            >>> x = torch.Tensor([[1], [2], [3]])
-            >>> x.size()
-            torch.Size([3, 1])
-            >>> x.expand(3, 4)
-             1  1  1  1
-             2  2  2  2
-             3  3  3  3
-            [torch.FloatTensor of size 3x4]
-        """
-        result = self.new()
-        if len(sizes) == 1 and isinstance(sizes[0], torch.Size):
-            sizes = sizes[0]
-        else:
-            sizes = torch.Size(sizes)
-        src = self
-
-        src_dim = src.dim()
-        src_stride = list(src.stride())
-        src_size = list(src.size())
-
-        if len(sizes) != src_dim:
-            raise ValueError('the number of dimensions provided must equal tensor.dim()')
-
-        # create a new geometry for tensor:
-        for i, size in enumerate(src_size):
-            if size == 1:
-                src_size[i] = sizes[i]
-                src_stride[i] = 0
-            elif size != sizes[i]:
-                raise ValueError('incorrect size: only supporting singleton expansion (size=1)')
-
-        result.set_(src.storage(), src.storage_offset(), torch.Size(src_size),
-                    tuple(src_stride))
-        return result
 
     def expand_as(self, tensor):
         """Expands this tensor to the size of the specified tensor.
@@ -359,38 +261,6 @@ class _TensorBase(object):
         xxtensor = xtensor.expand_as(urtensor)
         urtensor.copy_(xxtensor)
         return result
-
-    def unsqueeze(self, dim):
-        """Returns a new tensor with a dimension of size one inserted at the
-        specified position.
-
-        The returned tensor shares the same underlying data with this tensor.
-
-        Args:
-            dim (int): The index at which to insert the singleton dimension
-
-        Example:
-            >>> x = torch.Tensor([1, 2, 3, 4])
-            >>> x.unsqueeze(0)
-             1  2  3  4
-            [torch.FloatTensor of size 1x4]
-            >>> x.unsqueeze(1)
-             1
-             2
-             3
-             4
-            [torch.FloatTensor of size 4x1]
-        """
-        return self.new(self).unsqueeze_(dim)
-
-    def unsqueeze_(self, dim):
-        """In-place version of :meth:`unsqueeze`."""
-        sizes = list(self.size())
-        sizes.insert(dim, 1)
-        strides = list(self.stride())
-        strides.insert(dim, strides[dim] if len(strides) < dim else 1)
-        return self.set_(self.storage(), self.storage_offset(),
-                         torch.Size(sizes), tuple(strides))
 
     # TODO: add tests for operators
     def __add__(self, other):
@@ -475,41 +345,10 @@ class _TensorBase(object):
         return self.ge(other)
 
     # TODO: add native add or and xor in the libs
-    def __and__(self, other):
-        if (type(self).__name__ != 'ByteTensor' or
-                type(other).__name__ != 'ByteTensor'):
+    def __invert__(self):
+        if type(self).__name__ != 'ByteTensor':
             raise RuntimeError('logical operations are supported on ByteTensors only')
-        return (self + other).eq(2)
-
-    def __or__(self, other):
-        if (type(self).__name__ != 'ByteTensor' or
-                type(other).__name__ != 'ByteTensor'):
-            raise RuntimeError('logical operations are supported on ByteTensors only')
-        return (self + other).gt(0)
-
-    def __xor__(self, other):
-        if (type(self).__name__ != 'ByteTensor' or
-                type(other).__name__ != 'ByteTensor'):
-            raise RuntimeError('logical operations are supported on ByteTensors only')
-        return (self + other).eq(1)
-
-    def __iand__(self, other):
-        if (type(self).__name__ != 'ByteTensor' or
-                type(other).__name__ != 'ByteTensor'):
-            raise RuntimeError('logical operations are supported on ByteTensors only')
-        return self.mul_(other)
-
-    def __ior__(self, other):
-        if (type(self).__name__ != 'ByteTensor' or
-                type(other).__name__ != 'ByteTensor'):
-            raise RuntimeError('logical operations are supported on ByteTensors only')
-        return self.copy_((self + other).gt(0))
-
-    def __ixor__(self, other):
-        if (type(self).__name__ != 'ByteTensor' or
-                type(other).__name__ != 'ByteTensor'):
-            raise RuntimeError('logical operations are supported on ByteTensors only')
-        return self.copy_((self + other).eq(1))
+        return (1 - self)
 
     def __hash__(self):
         return id(self)

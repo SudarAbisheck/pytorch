@@ -52,22 +52,27 @@ TYPE_TRANSFORMS = {
     'Float': {
         'THTensor*': 'THFloatTensor*',
         'real': 'float',
+        'accreal': 'double',
     },
     'Double': {
         'THTensor*': 'THDoubleTensor*',
         'real': 'double',
+        'accreal': 'double',
     },
     'CudaHalf': {
         'THCTensor*': 'THCudaHalfTensor*',
         'real': 'half',
+        'accreal': 'float',
     },
     'Cuda': {
         'THCTensor*': 'THCudaTensor*',
         'real': 'float',
+        'accreal': 'float',
     },
     'CudaDouble': {
         'THCTensor*': 'THCudaDoubleTensor*',
         'real': 'double',
+        'accreal': 'double',
     },
 }
 for t, transforms in TYPE_TRANSFORMS.items():
@@ -163,7 +168,7 @@ def wrap_generic():
     defs = OrderedDict()
 
     def should_wrap_function(name):
-        if name.startswith('LookupTable'):
+        if name.startswith('LookupTable_'):
             return False
         return (name.endswith('updateOutput') or
                 name.endswith('updateGradInput') or
